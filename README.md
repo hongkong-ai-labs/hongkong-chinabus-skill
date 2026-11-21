@@ -88,9 +88,10 @@ Prices and seat counts are live and can change.
 `ferries` shows berthing movements, not ticket availability. The board is
 cached for 90 seconds and may still show the last sailings after service ends.
 
-East Rail is reference data. MTR does not publish a working live East Rail feed
-(the endpoint returns `NT-205 ERL line is disabled in CMS`), so the CLI reports
-the service pattern rather than inventing a next train.
+East Rail here is reference data. MTR's live Next Train API includes East Rail
+again (verified 22 November 2026), so use `mtr_next_trains` from
+`hongkong-mtr-skill` for live EAL departures. If MTR disables the EAL feed
+(`NT-205`), the CLI reports the service pattern rather than inventing a train.
 
 `rail hsr` reads MTR's own timetable JSON and prints the actual scheduled
 departures from West Kowloon: train number, departure, arrival, duration and

@@ -139,11 +139,12 @@ empty or still show the previous day's final sailings; check the timestamp.
 
 ### Rail
 
-East Rail information is reference data, not a live feed. It covers Lo Wu
-(`low`) and Lok Ma Chau (`lmc`), the interchange at Sheung Shui, approximate
-first and last trains, and headways. MTR's open-data East Rail endpoint
-currently returns `NT-205 ERL line is disabled in CMS`, so there is no honest
-live next-train number to quote.
+East Rail information here is reference data. It covers Lo Wu (`low`) and Lok
+Ma Chau (`lmc`), the interchange at Sheung Shui, approximate first and last
+trains, and headways. MTR includes East Rail in its live Next Train API again
+(verified 22 November 2026); use the `hongkong-mtr-skill` `mtr_next_trains`
+tool for live departures. If MTR disables the EAL feed again (`NT-205`), quote
+the published headway instead of inventing a train.
 
 High-speed rail is different: `rail hsr` reads MTR's own timetable JSON and
 returns the actual scheduled departures from West Kowloon, with train number,
