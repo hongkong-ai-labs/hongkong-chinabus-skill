@@ -20,6 +20,10 @@ const IMMD_V: &str = "https://secure1.info.gov.hk/immd/mobileapps/2bb9ae17/data/
 const GOBYBUS_PAGE: &str =
     "https://www.gobybus.hk/route/en/hong-kong-and-shenzhen-bay-checkpoint-cross-border-bus/HKD";
 const FERRY_PAGE: &str = "https://crossboundaryferryservices.mardep.gov.hk/en/";
+const HSR_TIMETABLE: &str =
+    "https://www.highspeed.mtr.com.hk/res/content/app/XRL_content_Timetable.json";
+const HSR_STATIONS: &str =
+    "https://www.highspeed.mtr.com.hk/res/content/XRL_content_TripPlanning.json";
 
 /// One land boundary control point.
 #[derive(Debug, Clone, Serialize)]
@@ -83,6 +87,39 @@ pub struct FerryReport {
     pub cft_updated: String,
     pub mft_updated: String,
     pub movements: Vec<FerryMovement>,
+}
+
+/// One stop on an HSR service.
+#[derive(Debug, Clone, Serialize)]
+pub struct HsrStop {
+    pub code: String,
+    pub name: String,
+    pub name_zh: String,
+    pub time: String,
+}
+
+/// One scheduled HSR departure from West Kowloon.
+#[derive(Debug, Clone, Serialize)]
+pub struct HsrDeparture {
+    pub train: String,
+    pub destination: String,
+    pub destination_zh: String,
+    pub departs: String,
+    pub arrives: String,
+    pub duration_minutes: i64,
+    pub via: Vec<HsrStop>,
+    pub remarks: String,
+}
+
+/// Official MTR scheduled timetable, not a live feed.
+#[derive(Debug, Clone, Serialize)]
+pub struct HsrTimetable {
+    pub effective_from: String,
+    pub effective_to: String,
+    pub destination: String,
+    pub destination_zh: String,
+    pub source: String,
+    pub departures: Vec<HsrDeparture>,
 }
 
 /// Cached cross-border client.
@@ -167,6 +204,24 @@ impl Client {
             fetched_at: now_hkt(),
             points,
         })
+    }
+
+    /// MTR's official HSR timetable, filtered to trains from West Kowloon
+    /// that call at the requested destination.
+    pub async fn hsr_timetable(&self, destination: &str) -> Result<HsrTimetable> {
+        let (timetable, stations) = tokio::try_join!(
+            self.get(
+                "hsr-timetable",
+                HSR_TIMETABLE,
+                Duration::from_secs(6 * 3600)
+            ),
+            self.get("hsr-stations", HSR_STATIONS, Duration::from_secs(6 * 3600))
+        )?;
+        let timetable: Value = serde_json::from_str(timetable.trim_start_matches('\u{feff}'))
+            .context("decoding MTR HSR timetable")?;
+        let stations: Value = serde_json::from_str(stations.trim_start_matches('\u{feff}'))
+            .context("decoding MTR HSR stations")?;
+        parse_hsr_timetable(&timetable, &stations, destination)
     }
 
     /// GoByBus station directory plus the origin -> destination adjacency.
@@ -459,6 +514,202 @@ pub fn today_hkt() -> NaiveDate {
     Utc::now().with_timezone(&offset).date_naive()
 }
 
+fn clean_station_name(raw: &str) -> String {
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn hsr_friendly_name(code: &str) -> Option<&'static str> {
+    match code {
+        "WEK" => Some("Hong Kong West Kowloon"),
+        "SZB" => Some("Shenzhen North"),
+        "QIS" => Some("Nansha North"),
+        "XWQ" => Some("Guangzhou Xintang"),
+        "GZN" => Some("Guangzhou South"),
+        "GZD" => Some("Guangzhou East"),
+        _ => None,
+    }
+}
+
+fn normalized_name(raw: &str) -> String {
+    raw.chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn hsr_station_map(stations: &Value) -> HashMap<String, (String, String)> {
+    let mut map = HashMap::new();
+    for station in stations["station"].as_array().into_iter().flatten() {
+        let Some(code) = station["station_id"].as_str() else {
+            continue;
+        };
+        let name = clean_station_name(station["station_title_en"].as_str().unwrap_or_default());
+        let name_zh = clean_station_name(
+            station["station_title_tc"]
+                .as_str()
+                .or_else(|| station["station_title_sc"].as_str())
+                .unwrap_or_default(),
+        );
+        map.insert(code.to_string(), (name, name_zh));
+    }
+    map
+}
+
+fn parse_hsr_timetable(
+    timetable: &Value,
+    stations: &Value,
+    destination: &str,
+) -> Result<HsrTimetable> {
+    let names = hsr_station_map(stations);
+    let filter = if destination.eq_ignore_ascii_case("all") {
+        None
+    } else {
+        let wanted = normalized_name(destination);
+        let exact: Vec<String> = names
+            .iter()
+            .filter(|(code, (name, _))| {
+                code.eq_ignore_ascii_case(destination)
+                    || normalized_name(name) == wanted
+                    || hsr_friendly_name(code)
+                        .is_some_and(|friendly| normalized_name(friendly) == wanted)
+            })
+            .map(|(code, _)| code.clone())
+            .collect::<Vec<_>>();
+        let matches = if exact.is_empty() {
+            names
+                .iter()
+                .filter(|(code, (name, _))| {
+                    normalized_name(name).contains(&wanted)
+                        || hsr_friendly_name(code)
+                            .is_some_and(|friendly| normalized_name(friendly).contains(&wanted))
+                })
+                .map(|(code, _)| code.clone())
+                .collect::<Vec<_>>()
+        } else {
+            exact
+        };
+        match matches.as_slice() {
+            [code] => Some(code.clone()),
+            [] => bail!(
+                "no HSR station matches {destination:?}; try Futian, Shenzhen North, Guangzhou South or Guangzhou East"
+            ),
+            many => {
+                let mut options = many
+                    .iter()
+                    .filter_map(|code| names.get(code).map(|(name, _)| name.as_str()))
+                    .collect::<Vec<_>>();
+                options.sort_unstable();
+                bail!(
+                    "{destination:?} matches several HSR stations: {}",
+                    options.join(", ")
+                );
+            }
+        }
+    };
+
+    let (destination_name, destination_zh) = match &filter {
+        Some(code) => (
+            hsr_friendly_name(code)
+                .map(str::to_string)
+                .or_else(|| names.get(code).map(|(name, _)| name.clone()))
+                .unwrap_or_else(|| code.to_string()),
+            names
+                .get(code)
+                .map(|(_, name_zh)| name_zh.clone())
+                .unwrap_or_default(),
+        ),
+        None => ("All destinations".to_string(), "所有目的地".to_string()),
+    };
+
+    let mut departures = Vec::new();
+    for entry in timetable["routes"].as_array().into_iter().flatten() {
+        let Some(train) = entry.as_object().and_then(|object| object.values().next()) else {
+            continue;
+        };
+        if train["start_station_code"].as_str() != Some("WEK") {
+            continue;
+        }
+        let mut stops: Vec<(String, String)> = train["routestation"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter_map(|(code, stop)| Some((code.clone(), stop["time"].as_str()?.to_string())))
+            .collect();
+        stops.sort_by(|left, right| left.1.cmp(&right.1));
+        let Some((_, departs)) = stops.first() else {
+            continue;
+        };
+        let destination_index = match &filter {
+            Some(code) => stops.iter().position(|(stop, _)| stop == code),
+            None => stops.len().checked_sub(1),
+        };
+        let Some(destination_index) = destination_index.filter(|index| *index > 0) else {
+            continue;
+        };
+        let (code, arrives) = &stops[destination_index];
+        let via = stops[1..destination_index]
+            .iter()
+            .map(|(stop, time)| {
+                let (name, name_zh) = names
+                    .get(stop)
+                    .cloned()
+                    .unwrap_or_else(|| (stop.clone(), String::new()));
+                HsrStop {
+                    code: stop.clone(),
+                    name,
+                    name_zh,
+                    time: time.clone(),
+                }
+            })
+            .collect();
+        let duration = hsr_minutes(departs, arrives)
+            .with_context(|| format!("invalid HSR times {departs}-{arrives} for {train:?}"))?;
+        departures.push(HsrDeparture {
+            train: train["id"].as_str().unwrap_or_default().to_string(),
+            destination: hsr_friendly_name(code)
+                .map(str::to_string)
+                .or_else(|| names.get(code).map(|(name, _)| name.clone()))
+                .unwrap_or_else(|| code.clone()),
+            destination_zh: names
+                .get(code)
+                .map(|(_, name_zh)| name_zh.clone())
+                .unwrap_or_default(),
+            departs: departs.clone(),
+            arrives: arrives.clone(),
+            duration_minutes: duration,
+            via,
+            remarks: train["remarks_EN"].as_str().unwrap_or_default().to_string(),
+        });
+    }
+    departures.sort_by(|left, right| left.departs.cmp(&right.departs));
+    Ok(HsrTimetable {
+        effective_from: timetable["effective_from"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        effective_to: timetable["effective_to"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string(),
+        destination: destination_name,
+        destination_zh,
+        source: "https://www.highspeed.mtr.com.hk/en/ticket/timetable.html".to_string(),
+        departures,
+    })
+}
+
+fn hsr_minutes(departs: &str, arrives: &str) -> Option<i64> {
+    let parse = |value: &str| {
+        let (hour, minute) = value.split_once(':')?;
+        Some(hour.parse::<i64>().ok()? * 60 + minute.parse::<i64>().ok()?)
+    };
+    let mut duration = parse(arrives)? - parse(departs)?;
+    if duration < 0 {
+        duration += 24 * 60;
+    }
+    Some(duration)
+}
+
 /// East Rail / high-speed rail reference information.
 pub mod rail {
     pub const EAST_RAIL: [(&str, &str, &str, &str, &str); 2] = [
@@ -477,74 +728,6 @@ pub mod rail {
             "About every 10-12 minutes from Sheung Shui; connects to the Huanggang port shuttle",
         ),
     ];
-
-    pub const HSR_DESTINATIONS: [(&str, &str, &str, &str, &str); 9] = [
-        (
-            "futian",
-            "Futian",
-            "福田",
-            "14-18 min",
-            "About every 10-20 minutes",
-        ),
-        (
-            "shenzhen-north",
-            "Shenzhen North",
-            "深圳北",
-            "18-25 min",
-            "About every 10-20 minutes",
-        ),
-        (
-            "guangmingcheng",
-            "Guangmingcheng",
-            "光明城",
-            "25-35 min",
-            "Regular short-haul service",
-        ),
-        (
-            "dongguannan",
-            "Dongguannan",
-            "東莞南",
-            "30-45 min",
-            "Regular short-haul service",
-        ),
-        (
-            "changping",
-            "Changping",
-            "常平",
-            "40-55 min",
-            "Regular short-haul service",
-        ),
-        (
-            "dongguan",
-            "Dongguan",
-            "東莞",
-            "40-60 min",
-            "Regular short-haul service",
-        ),
-        (
-            "guangzhou-xintang",
-            "Guangzhou Xintang",
-            "廣州新塘",
-            "45-60 min",
-            "Regular short-haul service",
-        ),
-        (
-            "guangzhou-south",
-            "Guangzhou South",
-            "廣州南",
-            "47-75 min",
-            "Frequent short-haul service",
-        ),
-        (
-            "guangzhou-east",
-            "Guangzhou East",
-            "廣州東",
-            "70-90 min",
-            "Regular short-haul service",
-        ),
-    ];
-
-    pub const HSR_NOTE: &str = "West Kowloon departures run from about 07:00 to 23:00. MTR publishes the timetable as a PDF and 12306 is the booking authority; this skill does not invent live train times. Check the official timetable or 12306 before travelling.";
 }
 
 #[cfg(test)]
@@ -559,6 +742,42 @@ mod tests {
             "closed / not in service"
         );
         assert_eq!(queue_label(None), "unknown");
+    }
+
+    #[test]
+    fn parses_hsr_timetable_and_resolves_names() {
+        let stations = serde_json::json!({
+            "station": [
+                {"station_id": "WEK", "station_title_en": "Hong Kong\n West Kowloon", "station_title_tc": "香港西九龍"},
+                {"station_id": "FUT", "station_title_en": "Futian", "station_title_tc": "福田"},
+                {"station_id": "SZB", "station_title_en": "Shenzhenbei", "station_title_tc": "深圳北"}
+            ]
+        });
+        let timetable = serde_json::json!({
+            "effective_from": "11/10/2026",
+            "effective_to": "11/01/2027",
+            "routes": [
+                {"G1": {"id": "G1", "start_station_code": "WEK", "end_station_code": "SZB", "start_time": "07:01", "end_time": "07:19", "remarks_EN": "", "routestation": {"WEK": {"time": "07:01"}, "FUT": {"time": "07:11"}, "SZB": {"time": "07:19"}}}},
+                {"G2": {"id": "G2", "start_station_code": "SZB", "end_station_code": "WEK", "start_time": "08:00", "end_time": "08:18", "remarks_EN": "", "routestation": {"SZB": {"time": "08:00"}, "WEK": {"time": "08:18"}}}}
+            ]
+        });
+        let report = parse_hsr_timetable(&timetable, &stations, "Shenzhen North").unwrap();
+        assert_eq!(report.destination, "Shenzhen North");
+        assert_eq!(report.departures.len(), 1);
+        let departure = &report.departures[0];
+        assert_eq!(departure.train, "G1");
+        assert_eq!(departure.departs, "07:01");
+        assert_eq!(departure.arrives, "07:19");
+        assert_eq!(departure.duration_minutes, 18);
+        assert_eq!(departure.via[0].name, "Futian");
+        assert_eq!(
+            parse_hsr_timetable(&timetable, &stations, "all")
+                .unwrap()
+                .departures
+                .len(),
+            1
+        );
+        assert!(parse_hsr_timetable(&timetable, &stations, "nowhere").is_err());
     }
 
     #[test]

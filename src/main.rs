@@ -84,6 +84,9 @@ enum RailMode {
         /// Destination slug or name, or all.
         #[arg(long, default_value = "all")]
         to: String,
+        /// Maximum departures to print.
+        #[arg(long, default_value_t = 40)]
+        limit: usize,
     },
 }
 
@@ -165,7 +168,14 @@ async fn run() -> Result<()> {
         }
         Command::Rail { mode } => match mode {
             RailMode::EastRail { station } => print!("{}", render::east_rail(&station)),
-            RailMode::Hsr { to } => print!("{}", render::hsr(&to)),
+            RailMode::Hsr { to, limit } => {
+                let report = client.hsr_timetable(&to).await?;
+                if cli.json {
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                } else {
+                    print!("{}", render::hsr_timetable(&report, limit));
+                }
+            }
         },
     }
     Ok(())

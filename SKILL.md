@@ -1,6 +1,6 @@
 ---
 name: hongkong-chinabus-skill
-description: Hong Kong cross-border travel from one Rust CLI and MCP server — live Immigration Department queue times at every land boundary, GoByBus coach schedules and prices to mainland China and Macao, the Marine Department cross-boundary ferry board, and East Rail / high-speed rail service information for Lo Wu, Lok Ma Chau, Shenzhen and Guangzhou. Use for any question about crossing between Hong Kong, Shenzhen, Macao, Zhuhai or the mainland.
+description: Hong Kong cross-border travel from one Rust CLI and MCP server — live Immigration Department queue times at every land boundary, GoByBus coach schedules and prices to mainland China and Macao, the Marine Department cross-boundary ferry board, East Rail service information, and the official MTR high-speed rail timetable for Shenzhen and Guangzhou. Use for any question about crossing between Hong Kong, Shenzhen, Macao, Zhuhai or the mainland.
 license: MIT
 ---
 
@@ -37,6 +37,30 @@ The script checks `$HKCHINABUS_BIN`, `hkchinabus` on `PATH`, then builds with
 `cargo build --release --locked`. `scripts/install.sh` installs into
 `~/.local/bin`.
 
+### Install the binary directly
+
+`npx skills add` installs the skill files. If the binary is missing, install it
+with the release installer or cargo:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hongkong-ai-labs/hongkong-chinabus-skill/main/scripts/install.sh | sh
+# or
+cargo install --git https://github.com/hongkong-ai-labs/hongkong-chinabus-skill --locked
+```
+
+Register it with any MCP client:
+
+```bash
+npx add-mcp "$(command -v hkchinabus) mcp" --name hongkong-chinabus -a claude-code -a codex -a cursor -y
+claude mcp add hongkong-chinabus -- hkchinabus mcp
+codex mcp add hongkong-chinabus -- hkchinabus mcp
+```
+
+`add-mcp` detects the client configuration files in the current project; add
+`-g` for a global install. `$(command -v hkchinabus)` keeps the entry correct
+when the binary is on `PATH`; substitute an absolute path if your client does
+not inherit the shell `PATH`.
+
 ## CLI
 
 All times are Hong Kong time (UTC+8). Add `--json` anywhere for
@@ -59,7 +83,8 @@ $BIN ferries --port Shekou --direction departure --json
 $BIN rail east-rail
 $BIN rail east-rail --station lmc
 $BIN rail hsr
-$BIN rail hsr --to "Shenzhen North"
+$BIN rail hsr --to "Shenzhen North" --limit 12
+$BIN rail hsr --to "Guangzhou South" --json
 ```
 
 ### Border queues
@@ -114,20 +139,22 @@ empty or still show the previous day's final sailings; check the timestamp.
 
 ### Rail
 
-Rail information is reference data, not a live feed:
+East Rail information is reference data, not a live feed. It covers Lo Wu
+(`low`) and Lok Ma Chau (`lmc`), the interchange at Sheung Shui, approximate
+first and last trains, and headways. MTR's open-data East Rail endpoint
+currently returns `NT-205 ERL line is disabled in CMS`, so there is no honest
+live next-train number to quote.
 
-- **East Rail** — Lo Wu (`low`) and Lok Ma Chau (`lmc`), the interchange at
-  Sheung Shui, approximate first and last trains, and headways.
-- **High-speed rail** — journey times and typical frequency from West Kowloon
-  to Futian, Shenzhen North, Guangmingcheng, Dongguannan, Changping, Dongguan,
-  Guangzhou Xintang, Guangzhou South and Guangzhou East.
+High-speed rail is different: `rail hsr` reads MTR's own timetable JSON and
+returns the actual scheduled departures from West Kowloon, with train number,
+departure and arrival times, journey time and intermediate stops. Filter with
+`--to` (station code, English name or Chinese name) and cap the table with
+`--limit`; `--json` returns every matching departure and its stops. The
+source's effective dates are printed with the table.
 
-MTR's open-data East Rail endpoint currently returns
-`NT-205 ERL line is disabled in CMS`, so there is no honest live next-train
-number to quote. MTR publishes the high-speed timetable only as a PDF and
-12306 is the booking authority; train numbers, seat availability and fares are
-deliberately not invented here. Always point the user at the official
-timetable or 12306 for a specific departure.
+These are scheduled times, not live running or seat availability. 12306 is the
+booking authority, so check it for tickets and disruption before travelling.
+Fares and seat counts are deliberately not invented here.
 
 ## MCP
 
@@ -153,7 +180,7 @@ Tools:
 | `border_wait_times` | `{ "point"?: string }` |
 | `search_cross_border_coaches` | `{ "from": string, "to": string, "date"?: "YYYY-MM-DD", "limit"?: number }` |
 | `cross_border_ferry_board` | `{ "port"?: string, "terminal"?: "cft"\|"mft", "direction"?: "arrival"\|"departure" }` |
-| `cross_border_rail_info` | `{ "mode": "east-rail"\|"hsr", "destination"?: string }` |
+| `cross_border_rail_info` | `{ "mode": "east-rail"\|"hsr", "destination"?: string, "limit"?: number }` |
 
 The server speaks JSON-RPC 2.0 over stdio, one message per line, and implements
 `initialize`, `ping`, `tools/list` and `tools/call`.
@@ -166,8 +193,8 @@ The server speaks JSON-RPC 2.0 over stdio, one message per line, and implements
   boundary queues are separate from the coach journey.
 - Visa and entry requirements are outside this skill. Check the mainland,
   Macao and Hong Kong immigration authorities before travel.
-- High-speed rail and East Rail details here are service patterns. For a real
-  departure, use the MTR app, the official timetable or 12306.
+- High-speed rail times are the published schedule, not live running or seat
+  availability. For tickets and disruption, use 12306 or the MTR app.
 - Do not present this as an official channel of ImmD, MTR, GoByBus or the
   Marine Department.
 
@@ -181,4 +208,7 @@ The server speaks JSON-RPC 2.0 over stdio, one message per line, and implements
 - Marine Department cross-boundary ferries:
   `https://crossboundaryferryservices.mardep.gov.hk/en/`
 - MTR high-speed rail timetable:
-  `https://www.highspeed.mtr.com.hk/en/ticket/timetable.html`
+  `https://www.highspeed.mtr.com.hk/res/content/app/XRL_content_Timetable.json`
+  (human page: `https://www.highspeed.mtr.com.hk/en/ticket/timetable.html`)
+- MTR high-speed rail station names:
+  `https://www.highspeed.mtr.com.hk/res/content/XRL_content_TripPlanning.json`
