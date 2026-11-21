@@ -64,6 +64,7 @@ hkchinabus ferries --port Macao --terminal mft
 hkchinabus rail east-rail --station low
 hkchinabus rail hsr --to "Guangzhou South" --limit 12
 hkchinabus rail hsr --to "Shenzhen North" --json
+hkchinabus update --check
 ```
 
 Add `--json` before the subcommand for structured output:
@@ -214,6 +215,12 @@ cargo test
 cargo clippy -- -D warnings
 cargo fmt --check
 ```
+
+`rust-toolchain.toml` pins the stable toolchain with `rustfmt` and
+`clippy`, so `rustup` sets contributors up automatically. `just doc`
+builds the API documentation. See `CONTRIBUTING.md` for the full check
+list and the signed-commit requirement.
+
 
 The parsers for the GoByBus directory and the Marine Department board are
 covered by unit tests; the live endpoints are exercised manually because they

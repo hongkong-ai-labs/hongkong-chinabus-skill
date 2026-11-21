@@ -10,6 +10,8 @@ use clap::{Parser, Subcommand};
 
 use api::{Client, CoachStation};
 
+mod update;
+
 #[derive(Parser)]
 #[command(
     name = "hkchinabus",
@@ -67,6 +69,15 @@ enum Command {
         #[command(subcommand)]
         mode: RailMode,
     },
+    /// Update this binary using the method it was installed with
+    Update {
+        /// Only report the current version, latest release and install method
+        #[arg(long)]
+        check: bool,
+        /// Reinstall even when the current version is up to date
+        #[arg(long)]
+        force: bool,
+    },
     /// Run the MCP server over stdio.
     Mcp,
 }
@@ -102,6 +113,9 @@ async fn run() -> Result<()> {
     let cli = Cli::parse();
     let client = Client::new()?;
     match cli.command {
+        Command::Update { check, force } => {
+            update::run(check, force)?;
+        }
         Command::Mcp => mcp::serve(client).await?,
         Command::Borders { point } => {
             let mut report = client.borders().await?;

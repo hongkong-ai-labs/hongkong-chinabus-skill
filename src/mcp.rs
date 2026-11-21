@@ -17,8 +17,20 @@ pub async fn serve(client: Client) -> Result<()> {
         if line.is_empty() {
             continue;
         }
-        let Ok(request) = serde_json::from_str::<Value>(line) else {
-            continue;
+        let request = match serde_json::from_str::<Value>(line) {
+            Ok(request) => request,
+            Err(error) => {
+                let response = json!({
+                    "jsonrpc": "2.0",
+                    "id": null,
+                    "error": {"code": -32700, "message": format!("parse error: {error}")}
+                });
+                stdout
+                    .write_all(format!("{}\n", serde_json::to_string(&response)?).as_bytes())
+                    .await?;
+                stdout.flush().await?;
+                continue;
+            }
         };
         if request.get("id").is_none() {
             continue;
