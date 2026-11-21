@@ -64,6 +64,7 @@ hkchinabus ferries --port Macao --terminal mft
 hkchinabus rail east-rail --station low
 hkchinabus rail hsr --to "Guangzhou South" --limit 12
 hkchinabus rail hsr --to "Shenzhen North" --json
+hkchinabus update --check
 ```
 
 Add `--json` before the subcommand for structured output:

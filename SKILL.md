@@ -85,6 +85,7 @@ $BIN rail east-rail --station lmc
 $BIN rail hsr
 $BIN rail hsr --to "Shenzhen North" --limit 12
 $BIN rail hsr --to "Guangzhou South" --json
+$BIN update --check
 ```
 
 ### Border queues
