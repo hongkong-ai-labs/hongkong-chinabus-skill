@@ -1,27 +1,36 @@
 #!/usr/bin/env bash
-# Print the absolute path of a working hkchinabus binary.
+# Print the absolute path of a working hkchinabus binary, or exit 1.
 set -euo pipefail
 
-if [ -n "${HKCHINABUS_BIN:-}" ] && [ -x "$HKCHINABUS_BIN" ]; then
-  printf '%s\n' "$HKCHINABUS_BIN"
+if [[ -n "${HKCHINABUS_BIN:-}" && -x "${HKCHINABUS_BIN}" ]]; then
+  printf '%s\n' "$(cd "$(dirname "${HKCHINABUS_BIN}")" && pwd)/$(basename "${HKCHINABUS_BIN}")"
   exit 0
 fi
 
-if command -v hkchinabus >/dev/null 2>&1; then
-  command -v hkchinabus
+if resolved="$(command -v hkchinabus 2>/dev/null)" && [[ -n "$resolved" ]]; then
+  printf '%s\n' "$resolved"
   exit 0
 fi
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [ -f "$ROOT/Cargo.toml" ] && command -v cargo >/dev/null 2>&1; then
-  (cd "$ROOT" && cargo build --release --locked >/dev/null)
-  BIN="$ROOT/target/release/hkchinabus"
-  if [ -x "$BIN" ]; then
-    printf '%s\n' "$BIN"
-    exit 0
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(dirname "$script_dir")"
+
+if [[ -f "$script_dir/install.sh" ]] &&
+  path="$(sh "$script_dir/install.sh")" &&
+  [[ -n "$path" && -x "$path" ]]; then
+  printf '%s\n' "$path"
+  exit 0
+fi
+
+if [[ -f "$repo_root/Cargo.toml" ]] && command -v cargo >/dev/null 2>&1; then
+  if (cd "$repo_root" && cargo build --release --locked >&2); then
+    path="$repo_root/target/release/hkchinabus"
+    if [[ -x "$path" ]]; then
+      printf '%s\n' "$path"
+      exit 0
+    fi
   fi
 fi
 
-echo "hkchinabus: no binary found and no Cargo build available" >&2
-echo "Set HKCHINABUS_BIN, put hkchinabus on PATH, or build with: cargo build --release --locked" >&2
+printf 'ensure-binary: no hkchinabus binary via HKCHINABUS_BIN, PATH, install.sh or cargo build\n' >&2
 exit 1

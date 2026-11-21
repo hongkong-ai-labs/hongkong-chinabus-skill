@@ -16,14 +16,33 @@ official government feeds and GoByBus's public schedule endpoint.
 
 ## Install
 
-Requires Rust 1.89 or newer.
+**Agent skill** — installs `SKILL.md` and the binary bootstrap script:
 
 ```bash
-cargo build --release --locked
-./scripts/install.sh          # installs into ~/.local/bin
+npx skills add hongkong-ai-labs/hongkong-chinabus-skill
 ```
 
-Or run from the checkout with `cargo run -- <command>`.
+**Prebuilt binary** — macOS (Intel or Apple silicon) and Linux (x86_64 or
+aarch64, static musl), checksum-verified, into `~/.local/bin`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hongkong-ai-labs/hongkong-chinabus-skill/main/scripts/install.sh | sh
+```
+
+**From source** — Rust 1.89 or newer:
+
+```bash
+git clone https://github.com/hongkong-ai-labs/hongkong-chinabus-skill
+cd hongkong-chinabus-skill
+cargo install --path . --locked
+# or: cargo build --release --locked   # target/release/hkchinabus
+```
+
+Verify:
+
+```console
+$ hkchinabus --version
+```
 
 ## Usage
 
@@ -87,9 +106,85 @@ Tools: `border_wait_times`, `search_cross_border_coaches`,
 `cross_border_ferry_board`, `cross_border_rail_info`. See
 [`SKILL.md`](SKILL.md) for argument schemas and agent guidance.
 
+## Run modes and deployment
+
+| Mode | Start with | Use for |
+| --- | --- | --- |
+| CLI | `hkchinabus <command>` | Interactive use and shell scripts |
+| JSON | `<command>` with `--json` | `jq`, automation, other programs |
+| MCP stdio | `hkchinabus mcp` | Desktop and CLI MCP clients |
+| Container | `docker run --rm -i hkchinabus mcp` | No local Rust toolchain |
+
+### MCP and authentication
+
+This server is **stdio-only**: the client launches the process and speaks MCP
+over stdin/stdout. There is no listening port, so there is no network
+authentication layer and no API-key setting. Optional API keys in this project
+family apply only to servers that expose an HTTP transport. Keep the process
+local and let the MCP client manage it.
+
+Typical client entry:
+
+```json
+{
+  "mcpServers": {
+    "hongkong-chinabus-skill": {
+      "command": "hkchinabus",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+If the client does not inherit `PATH`, use the absolute installed path.
+
+### Docker and Apple container
+
+```bash
+docker build -t hkchinabus .
+docker run --rm hkchinabus --help
+docker run --rm -i hkchinabus mcp          # stdio MCP
+docker compose run --rm stdio             # same, through Compose
+```
+
+Apple's `container` runtime uses the same OCI image:
+
+```bash
+container build -t hkchinabus .
+container run --rm hkchinabus --help
+container run --rm -i hkchinabus mcp
+```
+
+The runtime image contains the release binary and CA certificates, runs as a
+non-root user, and defaults to `--help` so a bare `docker run` is harmless.
+
+### Cloudflare and WASM
+
+There is no Worker or WASM deployment. The binary talks directly to upstream
+HTTP APIs over TLS and uses a Tokio runtime; packaging it as a stdio server is
+the supported integration. A Worker would need a separate HTTP/JavaScript
+adapter and is out of scope for this repo.
+
+### Releases
+
+Pushing a `v*` tag runs the release workflow, which checks the tag against
+`Cargo.toml` and `CHANGELOG.md`, builds four targets, smoke-tests native
+binaries and publishes:
+
+- `hkchinabus-<tag>-<target>.tar.gz` for macOS and static Linux
+- `SHA256SUMS` covering every tarball
+
+`scripts/install.sh` downloads the latest release, verifies its checksum and
+falls back to `cargo build --release --locked` when no release is available.
+`just tag X.Y.Z` creates the annotated tag locally; `just release X.Y.Z` tags
+and pushes to trigger the workflow.
+
 ## Development
 
 ```bash
+just                 # fmt check, clippy with -D warnings, tests
+just skill-check     # validate SKILL.md and shell syntax
+just container       # build the image and print CLI help
 cargo test
 cargo clippy -- -D warnings
 cargo fmt --check
