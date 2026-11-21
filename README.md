@@ -215,6 +215,12 @@ cargo clippy -- -D warnings
 cargo fmt --check
 ```
 
+`rust-toolchain.toml` pins the stable toolchain with `rustfmt` and
+`clippy`, so `rustup` sets contributors up automatically. `just doc`
+builds the API documentation. See `CONTRIBUTING.md` for the full check
+list and the signed-commit requirement.
+
+
 The parsers for the GoByBus directory and the Marine Department board are
 covered by unit tests; the live endpoints are exercised manually because they
 change during the day.
