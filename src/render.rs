@@ -173,36 +173,57 @@ pub fn east_rail(station: &str) -> String {
     out
 }
 
-pub fn hsr(destination: &str) -> String {
-    let mut matches = Vec::new();
-    for (slug, name, name_zh, duration, frequency) in crate::api::rail::HSR_DESTINATIONS {
-        if destination == "all"
-            || destination.eq_ignore_ascii_case(slug)
-            || name.to_lowercase().contains(&destination.to_lowercase())
-        {
-            matches.push((slug, name, name_zh, duration, frequency));
-        }
-    }
-    if matches.is_empty() {
-        let mut out = String::from("High-speed rail destinations from West Kowloon\n\n");
-        for (_, name, name_zh, duration, frequency) in crate::api::rail::HSR_DESTINATIONS {
-            out.push_str(&format!("{name} ({name_zh}) — {duration}, {frequency}\n"));
-        }
-        out.push_str("\nUse --to <destination> for detail.\n");
+pub fn hsr_timetable(report: &crate::api::HsrTimetable, limit: usize) -> String {
+    let mut out = format!(
+        "High-speed rail timetable — West Kowloon → {} ({})\n\
+         Effective {} to {}  |  official MTR timetable, not live\n\n",
+        report.destination, report.destination_zh, report.effective_from, report.effective_to
+    );
+    if report.departures.is_empty() {
+        out.push_str("No scheduled departures found.\n");
         return out;
     }
-    let mut out = String::new();
-    for (slug, name, name_zh, duration, frequency) in matches {
+    let rows = report
+        .departures
+        .iter()
+        .take(limit)
+        .map(|departure| {
+            let via = if departure.via.is_empty() {
+                "non-stop".to_string()
+            } else {
+                departure
+                    .via
+                    .iter()
+                    .map(|stop| stop.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            (
+                departure.train.clone(),
+                truncate(&departure.destination, 24),
+                departure.departs.clone(),
+                departure.arrives.clone(),
+                format!("{} min", departure.duration_minutes),
+                truncate(&via, 42),
+            )
+        })
+        .collect::<Vec<_>>();
+    out.push_str(&format!(
+        "{:<7} {:<24} {:<8} {:<8} {:<10} {}\n",
+        "TRAIN", "TO", "DEPARTS", "ARRIVES", "DURATION", "VIA"
+    ));
+    out.push_str(&"-".repeat(102));
+    out.push('\n');
+    for (train, destination, departs, arrives, duration, via) in &rows {
         out.push_str(&format!(
-            "High-speed rail — West Kowloon to {name} ({name_zh}) [{slug}]\n\n\
-             Journey time: {duration}\n\
-             Frequency: {frequency}\n\
-             {}\n\n\
-             Official timetable: https://www.highspeed.mtr.com.hk/en/ticket/timetable.html\n\
-             Booking and live seat availability: https://www.12306.cn\n",
-            crate::api::rail::HSR_NOTE
+            "{train:<7} {destination:<24} {departs:<8} {arrives:<8} {duration:<10} {via}\n"
         ));
     }
+    out.push_str(&format!(
+        "\n{} departure(s) shown of {}. Scheduled times only; check 12306 for booking and live status.\n",
+        rows.len(),
+        report.departures.len()
+    ));
     out
 }
 

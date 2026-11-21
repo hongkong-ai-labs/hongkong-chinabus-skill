@@ -8,8 +8,8 @@ Hong Kong cross-border travel in one Rust CLI and MCP server:
   between Hong Kong and Shenzhen, Guangzhou, Macao, Zhuhai and beyond.
 - **Cross-boundary ferries** — the Marine Department berthing board for China
   Ferry Terminal and Macau Ferry Terminal.
-- **Rail** — East Rail service to Lo Wu and Lok Ma Chau, and high-speed rail
-  destinations and journey times from West Kowloon.
+- **Rail** — East Rail service to Lo Wu and Lok Ma Chau, and the official MTR
+  high-speed rail timetable from West Kowloon with exact scheduled departures.
 
 No API keys, no accounts, no scraping of booking pages. Data comes from
 official government feeds and GoByBus's public schedule endpoint.
@@ -20,6 +20,7 @@ official government feeds and GoByBus's public schedule endpoint.
 
 ```bash
 npx skills add hongkong-ai-labs/hongkong-chinabus-skill
+npx skills update        # refresh the installed skill later
 ```
 
 **Prebuilt binary** — macOS (Intel or Apple silicon) and Linux (x86_64 or
@@ -35,6 +36,8 @@ curl -fsSL https://raw.githubusercontent.com/hongkong-ai-labs/hongkong-chinabus-
 git clone https://github.com/hongkong-ai-labs/hongkong-chinabus-skill
 cd hongkong-chinabus-skill
 cargo install --path . --locked
+# or directly from GitHub:
+cargo install --git https://github.com/hongkong-ai-labs/hongkong-chinabus-skill --locked
 # or: cargo build --release --locked   # target/release/hkchinabus
 ```
 
@@ -59,7 +62,8 @@ hkchinabus ferries
 hkchinabus ferries --port Macao --terminal mft
 
 hkchinabus rail east-rail --station low
-hkchinabus rail hsr --to "Guangzhou South"
+hkchinabus rail hsr --to "Guangzhou South" --limit 12
+hkchinabus rail hsr --to "Shenzhen North" --json
 ```
 
 Add `--json` before the subcommand for structured output:
@@ -84,10 +88,16 @@ Prices and seat counts are live and can change.
 `ferries` shows berthing movements, not ticket availability. The board is
 cached for 90 seconds and may still show the last sailings after service ends.
 
-`rail` is reference data. MTR does not publish a working live East Rail feed
-(the endpoint returns `NT-205 ERL line is disabled in CMS`), and the high-speed
-timetable is a PDF with 12306 as the booking authority. The CLI therefore
-reports service patterns and official links, never invented train times.
+East Rail is reference data. MTR does not publish a working live East Rail feed
+(the endpoint returns `NT-205 ERL line is disabled in CMS`), so the CLI reports
+the service pattern rather than inventing a next train.
+
+`rail hsr` reads MTR's own timetable JSON and prints the actual scheduled
+departures from West Kowloon: train number, departure, arrival, duration and
+intermediate stops. `--to` accepts a station code, English or Chinese name;
+`--limit` caps the table; `--json` returns every match. These are scheduled
+times, not live running or seat availability. 12306 remains the booking
+authority, and fares/seat counts are not invented.
 
 ## MCP
 
@@ -101,6 +111,20 @@ reports service patterns and official links, never invented train times.
   }
 }
 ```
+
+Register it with any MCP client:
+
+```bash
+npx add-mcp "$(command -v hkchinabus) mcp" --name hongkong-chinabus -a claude-code -a codex -a cursor -y
+claude mcp add hongkong-chinabus -- hkchinabus mcp
+codex mcp add hongkong-chinabus -- hkchinabus mcp
+```
+
+`add-mcp` detects the client configuration files in the current project; add
+`-g` for a global install. `$(command -v hkchinabus)` keeps the entry correct
+when the binary is on `PATH`; substitute an absolute path if your client does
+not inherit the shell `PATH`.
+
 
 Tools: `border_wait_times`, `search_cross_border_coaches`,
 `cross_border_ferry_board`, `cross_border_rail_info`. See

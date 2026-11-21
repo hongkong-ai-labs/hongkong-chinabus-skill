@@ -113,12 +113,13 @@ fn tools() -> Value {
         },
         {
             "name": "cross_border_rail_info",
-            "description": "East Rail service to Lo Wu and Lok Ma Chau, and high-speed rail destinations from West Kowloon to Shenzhen and Guangzhou. Returns published service patterns, not live train times.",
+            "description": "East Rail service to Lo Wu and Lok Ma Chau, and the official MTR high-speed rail timetable from West Kowloon to Shenzhen and Guangzhou. HSR results are scheduled departures, not live train times.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "mode": {"type": "string", "enum": ["east-rail", "hsr"], "description": "Rail mode."},
-                    "destination": {"type": "string", "description": "Station or destination slug/name; defaults to all."}
+                    "destination": {"type": "string", "description": "Station or destination slug/name; defaults to all."},
+                    "limit": {"type": "number", "description": "Maximum HSR departures to return (default 40)."}
                 },
                 "required": ["mode"]
             }
@@ -212,9 +213,12 @@ async fn call_tool(client: &Client, request: &Value) -> Result<String> {
             Some("east-rail") => Ok(render::east_rail(
                 &arg("destination").unwrap_or_else(|| "all".to_string()),
             )),
-            Some("hsr") => Ok(render::hsr(
-                &arg("destination").unwrap_or_else(|| "all".to_string()),
-            )),
+            Some("hsr") => {
+                let destination = arg("destination").unwrap_or_else(|| "all".to_string());
+                let report = client.hsr_timetable(&destination).await?;
+                let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(40) as usize;
+                Ok(render::hsr_timetable(&report, limit))
+            }
             other => anyhow::bail!("mode must be east-rail or hsr, got {other:?}"),
         },
         other => anyhow::bail!("unknown tool: {other}"),
